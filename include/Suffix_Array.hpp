@@ -39,7 +39,7 @@ private:
     idx_t* part_size_scan_; // Inclusive scan (prefix sum) of the sizes of the pivoted final partitions containing appropriate sorted sub-subarrays.
     idx_t* part_ruler_; // "Ruler" for the partitions—contains the indices of each sub-subarray in each partition.
 
-    static constexpr idx_t default_subproblem_count = 8192; // Default subproblem-count to use in construction.
+    static constexpr idx_t default_subproblem_count = 128; // Default subproblem-count; the basin minimum for ecoli-scale inputs (see baseline). Scale up for genome-scale `n`.
     static constexpr idx_t nested_par_grain_size = (1lu << 13); // Granularity for nested parallelism to kick in.
 
     // Fields for profiling time.
