@@ -10,7 +10,7 @@
 #include <fstream>
 #include <chrono>
 
-#include <immintrin.h>
+#include <simd>
 
 // =============================================================================
 
@@ -49,30 +49,9 @@ private:
 
 
     // Returns the LCP length of `x` and `y`, where `min_len` is the length of
-    // the shorter of `x` and `y`.
+    // the shorter of `x` and `y`. Full native-width SIMD lanes are compared in
+    // a flat loop; the remaining sub-lane tail is compared scalar.
     static idx_t lcp(const char* x, const char* y, idx_t min_len);
-
-    // Returns the LCP length of `x` and `y`, where `min_len` is the length of
-    // the shorter of `x` and `y`. Optimized with some poor man's vectorization.
-    static idx_t lcp_opt(const char* x, const char* y, idx_t min_len);
-
-    // Returns the LCP length of `x` and `y`, where `min_len` is the length of
-    // the shorter of `x` and `y`. Optimized with some poor man's vectorization.
-    static idx_t lcp_opt_avx(const char* x, const char* y, idx_t min_len);
-
-    // Returns the LCP length of `x` and `y`, where `min_len` is the length of
-    // the shorter of `x` and `y`. Optimized with some poor man's vectorization.
-    // NOTE: hand unrolled version of `lcp_opt_avx`.
-    static idx_t lcp_opt_avx_unrolled(const char* x, const char* y, idx_t min_len);
-
-    // Returns the LCP length of `x` and `y`, where `min_len` is the length of
-    // the shorter of `x` and `y`. `N x 32` bytes of prefix comparisons are
-    // loop-unrolled.
-    template <std::size_t N = 8>
-    static idx_t LCP(const char* x, const char* y, idx_t min_len);
-
-    // Returns the LCP length of the `32 x N`-bytes prefix of `x` and `y`.
-    template <std::size_t N> static idx_t LCP_unrolled(const char* x, const char* y);
 
     // Merges the sorted collections of suffixes, `X` and `Y`, with lengths
     // `len_x` and `len_y` and LCP arrays `LCP_x` and `LCP_y` respectively, into
@@ -184,60 +163,30 @@ public:
 template <typename T_idx_>
 inline T_idx_ Suffix_Array<T_idx_>::lcp(const char* const x, const char* const y, const idx_t min_len)
 {
-    idx_t l = 0;
-    while(l < min_len && x[l] == y[l])
-        l++;
+    using vec = std::simd::vec<char>;   // A native-width SIMD lane, portable across ISAs (C++26 `std::simd`).
+    constexpr std::size_t simd_width = vec::size();  // Width (bytes) of a native SIMD lane.
 
-    return l;
-}
+    idx_t len = 0;  // LCP length matched so far.
 
-
-template <typename T_idx_>
-template <std::size_t N>
-inline T_idx_ Suffix_Array<T_idx_>::LCP(const char* const x, const char* const y, const idx_t min_len)
-{
-    idx_t lcp = 0;
-
-    if constexpr(N == 1)
+    // Compare full native-width lanes.
+    for(; min_len - len >= simd_width; len += simd_width)
     {
-        for(; lcp < min_len; ++lcp)
-            if(x[lcp] != y[lcp])
-                break;
+        const vec v1 = std::simd::unchecked_load<vec>(x + len, simd_width, std::simd::flag_default);  // Unaligned native-width loads.
+        const vec v2 = std::simd::unchecked_load<vec>(y + len, simd_width, std::simd::flag_default);
 
-        return lcp;
+        const auto neq = (v1 != v2);    // Per-byte inequality mask.
+        if(std::simd::any_of(neq))
+            return len + std::simd::reduce_min_index(neq);   // Offset of the first mismatching byte.
     }
-    else
-    {
-        while((min_len - lcp) >= N * 32)
-        {
-            const auto l = LCP_unrolled<N>(x + lcp, y + lcp);
-            lcp += l;
-            if(l < N * 32)
-                return lcp;
-        }
 
-        return lcp + LCP<N - 1>(x + lcp, y + lcp, min_len - lcp);
-    }
-}
+    // Sub-lane tail: compare the remaining `< simd_width` bytes one at a time.
+    // (GCC 16's `std::simd::partial_load` is miscompiled at the AVX2 ABI, so we
+    // avoid a masked load here; the tail is tiny, so this costs nothing.)
+    for(; len < min_len; ++len)
+        if(x[len] != y[len])
+            break;
 
-
-template <typename T_idx_>
-template <std::size_t N>
-inline T_idx_ Suffix_Array<T_idx_>::LCP_unrolled(const char* const x, const char* const y)
-{
-    if constexpr(N == 0)
-        return 0;
-    else
-    {
-        const auto v1 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(x));
-        const auto v2 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(y));
-        const auto cmp = _mm256_cmpeq_epi8(v1, v2);
-        const auto mask = static_cast<uint32_t>(_mm256_movemask_epi8(cmp));
-        if(mask != 0xFFFFFFFF)
-            return __builtin_ctz(~mask);
-
-        return 32 + LCP_unrolled<N - 1>(x + 32, y + 32);
-    }
+    return len;
 }
 
 }

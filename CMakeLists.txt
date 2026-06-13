@@ -15,7 +15,7 @@ project(${PROJECT_NAME}
 #set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules/")
 
 # Language standards and hard requirements for such.
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 26)  # Required for `std::simd` (`<simd>`); needs GCC >= 16.
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
