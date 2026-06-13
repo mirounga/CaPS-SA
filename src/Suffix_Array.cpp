@@ -21,14 +21,14 @@ Suffix_Array<T_idx_>::Suffix_Array(const char* const T, const idx_t n, const idx
     LCP_(allocate<idx_t>(n_)),
     SA_w(nullptr),
     LCP_w(nullptr),
-    p_(std::min(subproblem_count > 0 ? subproblem_count : default_subproblem_count, n / 16)),   // TODO: fix subproblem-count for small `n`.
+    p_(std::max<idx_t>(1, std::min(subproblem_count > 0 ? subproblem_count : default_subproblem_count, n / 16))),   // At least one subproblem; `n / 16` floors to 0 for `n < 16`.
     max_context(max_context ? max_context : n_),
     pivot_(nullptr),
     pivot_per_part_(std::min(static_cast<idx_t>(std::ceil(32.0 * std::log(n_))), n_ / p_ - 1)), // (c \ln n) or (|subarray| - 1)
     part_size_scan_(allocate<idx_t>(p_ + 1)),
     part_ruler_(allocate<idx_t>(p_ * (p_ + 1)))
 {
-    assert(n_ >= 16);   // TODO: fix subproblem-count for small `n`.
+    assert(n_ >= 1);    // Small `n` collapses to a single subproblem (`p_ == 1`).
 
     if(p_ > n_)
     {
@@ -114,6 +114,9 @@ void Suffix_Array<T_idx_>::merge_sort(idx_t* const X, idx_t* const Y, const idx_
 {
     assert(std::memcmp(X, Y, n * sizeof(idx_t)) == 0);
 
+    if(n == 0)  // Nothing to sort (e.g., an empty pivot-sample set when `p_ == 1`).
+        return;
+
     if(n == 1)
         LCP[0] = 0;
     else
@@ -188,6 +191,8 @@ template <typename T_idx_>
 void Suffix_Array<T_idx_>::sample_pivots(const idx_t* const X, const idx_t n, const idx_t m, idx_t* const P)
 {
     assert(m <= n);
+    if(m == 0)  // No pivots to sample (e.g., a single partition, where `p_ - 1 == 0`).
+        return;
     const auto gap = n / m; // Distance-gap between pivots.
     for(idx_t i = 0; i < m; ++i)
         P[i] = X[(i + 1) * gap - 1];
